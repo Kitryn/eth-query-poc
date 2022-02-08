@@ -8,13 +8,36 @@ import { Contract, ethers } from "ethers";
 import fs from "fs/promises";
 
 const INFURA_API_KEY = process.env.API_KEY;
+
+const START_BLOCK = +process.argv[2];
+const END_BLOCK = +process.argv[3];
+const WETH_THRESHOLD = process.argv[4];
+
+if (START_BLOCK == null || END_BLOCK == null) {
+  console.error(
+    `Start block or end block not provided! Call like yarn start 14000000 15000000 11000`
+  );
+  process.exit(1);
+}
+if (!Number.isInteger(START_BLOCK) || !Number.isInteger(END_BLOCK)) {
+  console.error(`Invalid value passed for start block or end block!`);
+  process.exit(1);
+}
+if (END_BLOCK <= START_BLOCK) {
+  console.error(`End block must come after start block!`);
+  process.exit(1);
+}
+if (!Number.isInteger(+WETH_THRESHOLD)) {
+  console.error(`Invalid weth threshold passed in!`);
+  process.exit(1);
+}
+
 const WETH_ABI = require("./wethabi.json");
 const WETH_ADDRESS = "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2";
-const START_BLOCK_NUMBER = 14000000; // Jan 13 2022
-const BLOCK_PAGINATION_SIZE = 250; // ~700 API calls at current date. Mainly required because infura limits to 10000 results per call
+const BLOCK_PAGINATION_SIZE = 200; // ~700 API calls at current date. Mainly required because infura limits to 10000 results per call
 const NUM_ASYNC_CALLS = 100;
 
-const WETH_FILTER_THRESHOLD = ethers.utils.parseEther("1000");
+const WETH_FILTER_THRESHOLD = ethers.utils.parseEther(WETH_THRESHOLD);
 
 type Event = {
   blockNumber: number;
@@ -25,27 +48,27 @@ type Event = {
 };
 
 async function main() {
-  const provider = new ethers.providers.InfuraProvider(
-    "homestead",
-    INFURA_API_KEY
+  console.log(
+    `Querying blocks from ${START_BLOCK} to ${END_BLOCK}, filtering for transactions above ${WETH_THRESHOLD} eth`
   );
-  const weth_instance = new Contract(WETH_ADDRESS, WETH_ABI, provider);
-  const filter = weth_instance.filters.Transfer();
-
-  const currentBlock = await provider.getBlockNumber();
-  console.log(`Current block is: ${currentBlock}`);
-  let workingBlock = START_BLOCK_NUMBER;
-
+  let workingBlock = START_BLOCK;
   const events: Event[] = []; // JS is single threaded, ok for single output obj
 
   const blockGenerator = (function* () {
-    while (workingBlock < currentBlock) {
+    while (workingBlock < END_BLOCK) {
       yield workingBlock;
       workingBlock += BLOCK_PAGINATION_SIZE;
     }
   })();
 
   async function worker() {
+    const provider = new ethers.providers.InfuraProvider(
+      "homestead",
+      INFURA_API_KEY
+    );
+    const weth_instance = new Contract(WETH_ADDRESS, WETH_ABI, provider);
+    const filter = weth_instance.filters.Transfer();
+
     for (let block of blockGenerator) {
       const toBlock = block + BLOCK_PAGINATION_SIZE;
       console.log(`Querying ${block} to ${toBlock}`);
